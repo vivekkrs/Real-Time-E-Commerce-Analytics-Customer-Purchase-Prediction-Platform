@@ -1,0 +1,22 @@
+# Python Virtual Environments
+cluster/
+.venv/
+env/
+venv/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pytest_cache/
+
+# Spark & Streaming Checkpoints
+checkpoints/
+metastore_db/
+derby.log
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
