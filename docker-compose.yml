@@ -28,7 +28,19 @@ services:
     networks:
       - ecommerce-net
 
-  # 2. Real-Time Customer Session Producer
+  # 2. Train the model once before starting the scorer.
+  model-trainer:
+    build: .
+    container_name: ecommerce-model-trainer
+    command: ["python", "src/ml/train.py"]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    restart: "no"
+    networks:
+      - ecommerce-net
+
+  # 3. Real-Time Customer Session Producer
   producer:
     build: .
     container_name: ecommerce-producer
@@ -42,13 +54,18 @@ services:
     networks:
       - ecommerce-net
 
-  # 3. PySpark Structured Streaming & Real-Time ML Inference Scorer
+  # 4. PySpark Structured Streaming & Real-Time ML Inference Scorer
   streaming:
     build: .
     container_name: ecommerce-streaming
     depends_on:
-      - producer
+      kafka:
+        condition: service_healthy
+      model-trainer:
+        condition: service_completed_successfully
     command: ["python", "src/streaming/spark_streaming.py"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
     volumes:
       - ./data:/app/data
       - ./models:/app/models
@@ -57,7 +74,7 @@ services:
     networks:
       - ecommerce-net
 
-  # 4. Streamlit Interactive Web Dashboard
+  # 5. Streamlit Interactive Web Dashboard
   dashboard:
     build: .
     container_name: ecommerce-dashboard
