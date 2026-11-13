@@ -8,3 +8,7 @@ __pycache__/
 .git/
 .gitignore
 checkpoints/
+models/
+data/processed/live_predictions/
+data/processed/live_predictions.jsonl
+data/processed/live_stream_buffer.jsonl

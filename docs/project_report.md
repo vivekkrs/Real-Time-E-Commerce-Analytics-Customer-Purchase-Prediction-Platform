@@ -32,7 +32,7 @@ flowchart TD
     subgraph Streaming_Layer ["3. Real-Time Streaming & Scoring"]
         Kafka --> SparkStream["Module 5: Spark Structured Streaming\n- Micro-batch ingestion\n- Schema enforcement\n- Native PipelineModel.transform()"]
         MLlib -.->|Load Model| SparkStream
-        SparkStream --> ScoredSink[("Live Predictions Sink\n(data/processed/live_predictions.jsonl)")]
+        SparkStream --> ScoredSink[("Live Predictions Sink\n(data/processed/live_predictions/)")]
     end
 
     subgraph Presentation_Layer ["4. Monitoring & Visualization"]
@@ -49,7 +49,7 @@ flowchart TD
 | **Foundational Distributed Primitives** | **PySpark RDDs** | Low-level distributed transformations (`map`, `filter`, `reduceByKey`, `mapValues`) demonstrating lineage (DAG) and lazy evaluation. |
 | **Structured Analytics** | **PySpark DataFrames & Spark SQL** | Relational queries, temporary views (`createOrReplaceTempView`), window functions (`DENSE_RANK`), and Catalyst query optimization. |
 | **Machine Learning** | **Spark MLlib (`pyspark.ml`)** | **Distributed ML pipeline** (`Pipeline`, `VectorAssembler`, `RandomForestClassifier`, `BinaryClassificationEvaluator`). *Strictly PySpark — no Scikit-Learn training used.* |
-| **Message Streaming** | **Apache Kafka (Docker Compose)** | Fault-tolerant event buffering and decoupling between web clickstream producers and Spark consumers. |
+| **Message Streaming** | **Apache Kafka (Docker Compose)** | Event transport between the replay producer and Spark's Kafka source. |
 | **Stream Processing** | **Spark Structured Streaming** | Continuous ingestion, schema validation, and real-time model scoring. |
 | **Interactive UI** | **Streamlit & Plotly** | Auto-refreshing visual dashboard displaying live conversion KPIs, probability gauges, and session feeds. |
 
@@ -106,7 +106,7 @@ flowchart TD
 * **Features:**
   * Attaches dynamic metadata: `session_id` (`SES-XXXXXX`) and ISO 8601 `event_timestamp`.
   * Serializes payloads to JSON and emits to Kafka topic `ecommerce-sessions`.
-  * Features a local fallback buffer (`data/processed/live_stream_buffer.jsonl`) for flexible deployment.
+  * Waits for broker delivery and reports send failures instead of silently dropping events.
 
 ---
 
@@ -116,8 +116,8 @@ flowchart TD
   * Defines explicit `StructType` schema for incoming events.
   * Loads `PipelineModel.load("models/spark_purchase_model")`.
   * Executes `model.transform(streaming_df)` on each micro-batch.
-  * Extracts calibrated purchase probabilities (`purchase_prob`) via PySpark UDF.
-  * Sinks predictions to `data/processed/live_predictions.jsonl` and console monitor.
+  * Extracts purchase probabilities (`purchase_prob`) with native `vector_to_array`.
+  * Sinks append-only JSON output to `data/processed/live_predictions/` with checkpointed Kafka offsets.
 
 ---
 
@@ -145,7 +145,7 @@ flowchart TD
 ## 🚀 Complete Execution Guide
 
 ### Option A: One-Command Docker Deployment (Recommended)
-Launch all 4 containers (Kafka, Producer, PySpark Streaming, Streamlit Dashboard) simultaneously:
+Launch the model trainer, Kafka, producer, PySpark streaming scorer, and Streamlit dashboard:
 
 ```powershell
 # Build and run entire platform in the background
@@ -167,8 +167,7 @@ docker compose down
 
 #### 1. Activate Environment
 ```powershell
-cd "d:\Cluster Computing\Assignment\ecommerce-intelligence"
-.\cluster\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 ```
 
 #### 2. Run Module 1: PySpark RDD Analytics
@@ -213,5 +212,5 @@ python src/ml/train.py
 | **Q1: Why did you use PySpark MLlib instead of Scikit-Learn?** | *Scikit-Learn executes on a single machine in Python memory, creating an architectural bottleneck for big data. PySpark MLlib distributes matrix computations and tree splitting across all Spark partitions and worker nodes. Crucially, PySpark produces a `PipelineModel` that can be directly applied to live streaming DataFrames using `.transform()`.* |
 | **Q2: Why use `reduceByKey` instead of `groupByKey` in RDDs?** | *`reduceByKey` performs map-side combiners before shuffling data across the network, reducing network I/O exponentially. `groupByKey` transfers all key-value pairs across worker nodes without local aggregation, frequently causing OutOfMemory (OOM) errors.* |
 | **Q3: What role does the Catalyst Optimizer play in Spark SQL?** | *The Catalyst Optimizer parses the SQL abstract syntax tree (AST), applies cost-based optimizations, performs predicate pushdown (filtering before reading data), and pushes projection pruning, generating highly optimized JVM bytecode.* |
-| **Q4: How does Spark Structured Streaming achieve fault tolerance?** | *Spark Structured Streaming pairs checkpointing with write-ahead logs (WAL) and Kafka offset tracking. If a failure occurs, the engine restarts from the exact committed offset, guaranteeing end-to-end exactly-once or at-least-once processing semantics.* |
+| **Q4: How does Spark Structured Streaming achieve fault tolerance?** | *Spark Structured Streaming stores source offsets and query progress in its checkpoint directory. Restarting with the same checkpoint resumes from recorded Kafka offsets; its file sink uses checkpointing to avoid duplicate committed batches.* |
 | **Q5: Why did you choose Random Forest over a single Decision Tree?** | *Random Forest uses bagging (Bootstrap Aggregating) and random feature subsets to construct an ensemble of decorrelated trees. This drastically reduces model variance and overfitting, yielding a robust 0.9174 ROC-AUC score and calibrated class probabilities.* |
