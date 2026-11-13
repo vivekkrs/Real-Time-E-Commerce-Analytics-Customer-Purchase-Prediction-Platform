@@ -12,6 +12,10 @@ __pycache__/
 
 # Spark & Streaming Checkpoints
 checkpoints/
+models/
+data/processed/live_predictions/
+data/processed/live_stream_buffer.jsonl
+data/processed/live_predictions.jsonl
 metastore_db/
 derby.log
 

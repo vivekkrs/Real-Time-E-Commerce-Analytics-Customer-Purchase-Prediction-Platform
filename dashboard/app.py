@@ -22,9 +22,9 @@ streamlit run dashboard/app.py
 """
 
 import os
-import sys
 import json
 import time
+import glob
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -81,7 +81,7 @@ st.markdown(
 
 # Base directories
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-predictions_file = os.path.join(base_dir, "data", "processed", "live_predictions.jsonl")
+predictions_dir = os.path.join(base_dir, "data", "processed", "live_predictions")
 summary_file = os.path.join(base_dir, "data", "processed", "batch_monthly_summary.csv")
 metrics_file = os.path.join(base_dir, "data", "processed", "model_metrics.json")
 raw_data_file = os.path.join(base_dir, "data", "raw", "online_shoppers_intention.csv")
@@ -144,20 +144,15 @@ st.write("")
 # DATA LOADING FUNCTION
 # -----------------------------------------------------------------------------
 def load_live_data():
-    if not os.path.exists(predictions_file):
+    if not os.path.isdir(predictions_dir):
         return pd.DataFrame()
-    records = []
-    with open(predictions_file, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                try:
-                    records.append(json.loads(line))
-                except Exception:
-                    pass
-    if not records:
+    files = glob.glob(os.path.join(predictions_dir, "*.json"))
+    if not files:
         return pd.DataFrame()
-    df = pd.DataFrame(records)
-    return df
+    frames = [pd.read_json(path, lines=True) for path in files]
+    df = pd.concat(frames, ignore_index=True)
+    df["event_timestamp"] = pd.to_datetime(df["event_timestamp"], utc=True)
+    return df.sort_values("event_timestamp").reset_index(drop=True)
 
 
 live_df = load_live_data()

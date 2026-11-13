@@ -1,112 +1,97 @@
-# Real-Time E-Commerce Analytics & Customer Purchase Prediction Platform
+# Real-Time E-Commerce Analytics & Customer Purchase Prediction
 
-A distributed big data platform that ingests real-time customer browsing clickstreams, performs distributed analytics, and predicts purchase probability (`Revenue: TRUE/FALSE`) using a pre-trained **PySpark MLlib** pipeline model.
+[GitHub repository](https://github.com/vivekkrs/Real-Time-E-Commerce-Analytics-Customer-Purchase-Prediction-Platform)
 
----
+An end-to-end analytics demo that replays online shopping sessions through Kafka, scores events with a PySpark MLlib model, and displays results in a Streamlit dashboard.
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart LR
-    A["Raw Dataset\n(UCI 12,330 sessions)"] --> B["Kafka Producer"]
-    B --> C["Apache Kafka\nTopic: ecommerce-sessions"]
-    C --> D["Spark Structured Streaming\n(Real-Time Ingestion)"]
-    E["PySpark MLlib Model\n(Random Forest 25 Trees)"] -.->|Load & Score| D
-    D --> F["Live Scored Sink\n(data/processed/)"]
-    F --> G["Streamlit Dashboard\n(http://localhost:8501)"]
+    A["UCI Online Shoppers dataset"] --> B["Python event producer"]
+    B --> C["Apache Kafka"]
+    C --> D["Spark Structured Streaming"]
+    E["Trained MLlib PipelineModel"] --> D
+    D --> F["JSON prediction files"]
+    F --> G["Streamlit dashboard"]
 ```
 
----
+The producer replays historical dataset rows as events. The Spark Kafka connector reads the topic and scores events with a persisted model. Spark writes append-only JSON output with checkpointing; the dashboard reads those output files.
 
-## 🛠️ Technology Stack
+## Technology
 
-| Layer | Technologies | Purpose |
-| :--- | :--- | :--- |
-| **Ingestion** | Apache Kafka, Python Producer | Decoupled event streaming & buffering |
-| **Batch Foundations** | PySpark RDDs | Low-level transformations (`map`, `filter`, `reduceByKey`) |
-| **Structured Analytics**| PySpark DataFrames, Spark SQL | Catalyst query optimization & window functions (`DENSE_RANK`) |
-| **Machine Learning** | PySpark MLlib (`pyspark.ml`) | Distributed Pipeline (`StringIndexer`, `OneHotEncoder`, `VectorAssembler`, `RandomForestClassifier`) |
-| **Stream Processing** | Spark Structured Streaming | Micro-batch ingestion & live model scoring |
-| **Presentation** | Streamlit + Plotly | Auto-refreshing live KPI cards, gauge & session feed |
-| **Orchestration** | Docker & Docker Compose | Single-command multi-container deployment |
+- Apache Kafka and `kafka-python` for event transport
+- PySpark RDDs, DataFrames, and Spark SQL for batch analytics
+- PySpark MLlib pipeline with a Random Forest classifier
+- Spark Structured Streaming for Kafka ingestion and model scoring
+- Streamlit and Plotly for the dashboard
+- Docker Compose for the end-to-end stack
 
----
+## Quick start with Docker
 
-## 🎯 Model Performance & Key Findings
-
-* **PySpark MLlib Test Evaluation (2,418 Sessions):**
-  * **ROC-AUC Score:** `0.9174`
-  * **PR-AUC Score:** `0.7530`
-  * **Accuracy:** `90.20%`
-  * **F1-Score:** `0.8908`
-* **Empirical Insight:** Sessions with `PageValues > 50` convert at **81.13%** (5.2x higher than baseline). First-time visitors convert at **24.91%** compared to **13.93%** for returning visitors.
-
----
-
-## 🚀 Quick Start
-
-### Option 1: One-Command Docker Run (Recommended)
-
-Make sure Docker Desktop is running, then run:
-
-```bash
-docker compose up --build -d
-```
-
-* **Dashboard Web UI:** Open [http://localhost:8501](http://localhost:8501)
-* **Check Status:** `docker compose ps`
-* **View Live Streaming Logs:** `docker compose logs -f streaming`
-* **Stop Everything:** `docker compose down`
-
----
-
-### Option 2: Local Step-by-Step Run (PowerShell)
+Requirements: Docker Desktop with Compose and an internet connection for the first image build and Spark Kafka connector download.
 
 ```powershell
-# 1. Activate Virtual Environment
-.\cluster\Scripts\Activate.ps1
-
-# 2. Run Module 1 (PySpark RDDs)
-python src/analytics/01_rdd_analytics.py
-
-# 3. Run Module 2 (Spark SQL Analytics)
-python src/analytics/02_spark_sql_analytics.py
-
-# 4. Run Module 3 (Train PySpark MLlib Model)
-python src/ml/train.py
-
-# 5. Start Live Pipeline (Open 3 Terminals)
-python src/producer/kafka_producer.py --rate 0.8     # Terminal 1: Event Producer
-python src/streaming/spark_streaming.py              # Terminal 2: Streaming Scorer
-streamlit run dashboard/app.py                       # Terminal 3: Dashboard UI
+docker compose up --build -d
+docker compose ps
 ```
 
----
+The first launch trains the model before starting the streaming scorer. Follow progress with `docker compose logs -f model-trainer`; open the dashboard at [http://localhost:8501](http://localhost:8501). Stop the services with:
 
-## 📂 Repository Structure
+```powershell
+docker compose down
+```
+
+Model files and Spark checkpoints are generated locally and are not committed.
+
+## Local development
+
+Requirements: Python 3.10+ and Java 17. On Windows, local Spark also needs a Hadoop `winutils` setup; Docker is the recommended option when that is unavailable.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python src/ml/train.py
+```
+
+Start Kafka with `docker compose up -d kafka`, then run each command in its own terminal:
+
+```powershell
+python src/producer/kafka_producer.py --rate 0.8
+python src/streaming/spark_streaming.py
+streamlit run dashboard/app.py
+```
+
+The producer and scorer use `localhost:9092` by default. Override the broker with `KAFKA_BOOTSTRAP`, and the topic with `KAFKA_TOPIC`. To replay a finite number of events, pass `--limit`, for example `--limit 100`.
+
+Run batch analytics and tests from the repository root:
+
+```powershell
+python src/analytics/01_rdd_analytics.py
+python src/analytics/02_spark_sql_analytics.py
+python src/ml/clustering.py
+python -m pytest
+```
+
+## Repository layout
 
 ```text
-ecommerce-intelligence/
-├── dashboard/
-│   └── app.py                        # Streamlit + Plotly live monitoring dashboard
-├── data/
-│   ├── processed/                    # Scored sessions, monthly summary, metrics JSON
-│   └── raw/                          # UCI Online Shoppers Purchasing Intention dataset
-├── docs/
-│   └── project_report.md             # Complete academic submission report
-├── models/
-│   └── spark_purchase_model/         # Serialized PySpark MLlib PipelineModel
-├── notebooks/
-│   └── exploratory_analysis.ipynb    # Jupyter Notebook for EDA & Spark SQL
-├── src/
-│   ├── analytics/                    # 01_rdd_analytics.py & 02_spark_sql_analytics.py
-│   ├── ml/                           # train.py (PySpark MLlib distributed training)
-│   ├── producer/                     # kafka_producer.py
-│   └── streaming/                    # spark_streaming.py
-├── tests/
-│   └── test_pipeline.py              # Sanity tests (run with: pytest tests/test_pipeline.py)
-├── docker-compose.yml                # Multi-service container orchestration
-├── Dockerfile                        # Python 3.11 + OpenJDK 17 Spark container
-├── requirements.txt                  # Python dependencies
-└── Notes.md                          # Comprehensive step-by-step notes & viva Q&A
+dashboard/       Streamlit dashboard
+data/raw/        UCI source dataset
+data/processed/  Batch analytics and model evaluation summaries
+docs/            Project report
+notebooks/       Exploratory Spark notebook
+src/analytics/   RDD and Spark SQL jobs
+src/ml/          Model training and clustering
+src/producer/    Kafka event producer
+src/streaming/   Kafka-to-Spark scoring pipeline
+tests/           Project tests
+Notes.md         Setup guide and project defense notes
 ```
+
+## Dataset and results
+
+The source data is the [Online Shoppers Purchasing Intention Dataset](https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset) from the UCI Machine Learning Repository (12,330 sessions). The included `data/processed/model_metrics.json` records a sample evaluation; rerun model training to regenerate metrics for the current environment and split.
+
+The checked-in batch summaries and model metrics are example outputs. Live predictions, the trained model, and streaming checkpoints are generated at runtime.
