@@ -18,7 +18,7 @@ flowchart LR
     F --> G["Streamlit Dashboard<br/>(localhost:8501)"]
 ```
 
-The producer replays historical dataset rows as events. Spark reads the Kafka topic, loads the trained pipeline model, and appends predictions to JSON output files with checkpointed Kafka offsets. The dashboard reads those files and refreshes the live metrics and session feed.
+The producer replays historical dataset rows as events. Spark reads the Kafka topic, loads the trained pipeline model, and appends predictions to JSON output files with checkpointed Kafka offsets. The dashboard refreshes its live charts and metrics from the newest 250 output files, capped at 10,000 sessions to keep long-running streams responsive.
 
 ---
 

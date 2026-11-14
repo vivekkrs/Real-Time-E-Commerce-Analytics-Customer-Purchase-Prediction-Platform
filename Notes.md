@@ -287,7 +287,7 @@ python src/streaming/spark_streaming.py
 - **Script:** `dashboard/app.py`
 - **Goal:** Real-time visual monitoring interface for stakeholders.
 - **Features:**
-  - **Live KPI Counters:** Total Sessions, Current Conversion Rate, High-Intent Sessions.
+  - **Live KPI Counters:** Recent sessions scored, recent high-intent sessions, intent rate, and average purchase probability (from the newest 250 output files, capped at 10,000 sessions).
   - **Interactive Gauges & Trend Charts:** Real-time purchase probability gauge, exit rate distribution, and monthly conversion comparisons.
   - **Live Stream Feed:** Real-time streaming table showing latest sessions with their predicted purchase probability and status tags.
 
