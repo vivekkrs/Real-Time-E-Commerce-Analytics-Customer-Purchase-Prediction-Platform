@@ -2,6 +2,8 @@
 pyspark==3.5.9
 kafka-python==2.2.15
 pandas
-streamlit>=1.49
+pyarrow
+streamlit
 plotly
+python-dotenv
 pytest

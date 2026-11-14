@@ -1,8 +1,6 @@
 # Real-Time E-Commerce Analytics & Customer Purchase Prediction Platform
 
-[GitHub repository](https://github.com/vivekkrs/Real-Time-E-Commerce-Analytics-Customer-Purchase-Prediction-Platform)
-
-A distributed analytics platform that replays online shopping sessions through Kafka, scores events with a PySpark MLlib model, and presents purchase predictions in a Streamlit dashboard.
+A distributed big data platform that ingests real-time customer browsing clickstreams, performs distributed analytics, and predicts purchase probability (`Revenue: TRUE/FALSE`) using a pre-trained **PySpark MLlib** pipeline model.
 
 ---
 
@@ -10,15 +8,13 @@ A distributed analytics platform that replays online shopping sessions through K
 
 ```mermaid
 flowchart LR
-    A["Raw UCI Dataset<br/>(12,330 sessions)"] --> B["Kafka Producer"]
-    B --> C["Apache Kafka<br/>Topic: ecommerce-sessions"]
-    C --> D["Spark Structured Streaming<br/>(Kafka ingestion and scoring)"]
-    E["PySpark MLlib Model<br/>(Random Forest, 25 trees)"] -.->|Load and score| D
-    D --> F["Live Scored Sink<br/>(data/processed/live_predictions/)"]
-    F --> G["Streamlit Dashboard<br/>(localhost:8501)"]
+    A["Raw Dataset\n(UCI 12,330 sessions)"] --> B["Kafka Producer"]
+    B --> C["Apache Kafka\nTopic: ecommerce-sessions"]
+    C --> D["Spark Structured Streaming\n(Real-Time Ingestion)"]
+    E["PySpark MLlib Model\n(Random Forest 25 Trees)"] -.->|Load & Score| D
+    D --> F["Live Scored Sink\n(data/processed/)"]
+    F --> G["Streamlit Dashboard\n(http://localhost:8501)"]
 ```
-
-The producer replays historical dataset rows as events. Spark reads the Kafka topic, loads the trained pipeline model, and appends predictions to JSON output files with checkpointed Kafka offsets. The dashboard refreshes its live charts and metrics from the newest 250 output files, capped at 10,000 sessions to keep long-running streams responsive.
 
 ---
 
@@ -26,91 +22,63 @@ The producer replays historical dataset rows as events. Spark reads the Kafka to
 
 | Layer | Technologies | Purpose |
 | :--- | :--- | :--- |
-| **Ingestion** | Apache Kafka, `kafka-python` | Event transport between the producer and Spark |
-| **Batch Foundations** | PySpark RDDs | Low-level transformations such as `map`, `filter`, and `reduceByKey` |
-| **Structured Analytics** | PySpark DataFrames, Spark SQL | Aggregations, Catalyst optimization, and window functions |
-| **Machine Learning** | PySpark MLlib | Feature pipeline and Random Forest purchase prediction |
-| **Stream Processing** | Spark Structured Streaming | Kafka ingestion, micro-batch scoring, and checkpointed output |
-| **Presentation** | Streamlit, Plotly | Auto-refreshing metrics, visualizations, and scored-session feed |
-| **Orchestration** | Docker, Docker Compose | Multi-service deployment, including model training |
+| **Ingestion** | Apache Kafka, Python Producer | Decoupled event streaming & buffering |
+| **Batch Foundations** | PySpark RDDs | Low-level transformations (`map`, `filter`, `reduceByKey`) |
+| **Structured Analytics**| PySpark DataFrames, Spark SQL | Catalyst query optimization & window functions (`DENSE_RANK`) |
+| **Machine Learning** | PySpark MLlib (`pyspark.ml`) | Distributed Pipeline (`StringIndexer`, `OneHotEncoder`, `VectorAssembler`, `RandomForestClassifier`) |
+| **Stream Processing** | Spark Structured Streaming | Micro-batch ingestion & live model scoring |
+| **Presentation** | Streamlit + Plotly | Auto-refreshing live KPI cards, gauge & session feed |
+| **Orchestration** | Docker & Docker Compose | Single-command multi-container deployment |
 
 ---
 
 ## 🎯 Model Performance & Key Findings
 
-The checked-in `data/processed/model_metrics.json` contains a sample evaluation from a seeded 80/20 train/test split. Its test set contains 2,418 sessions; retraining can produce run-specific metrics.
-
-- **ROC-AUC:** `0.9174`
-- **PR-AUC:** `0.7530`
-- **Accuracy:** `90.20%`
-- **F1-score:** `0.8908`
-- Sessions with `PageValues > 50` convert at **81.13%** (331 of 408 sessions).
-- New visitors convert at **24.91%**, compared with **13.93%** for returning visitors.
+* **PySpark MLlib Test Evaluation (2,418 Sessions):**
+  * **ROC-AUC Score:** `0.9174`
+  * **PR-AUC Score:** `0.7530`
+  * **Accuracy:** `90.20%`
+  * **F1-Score:** `0.8908`
+* **Empirical Insight:** Sessions with `PageValues > 50` convert at **81.13%** (5.2x higher than baseline). First-time visitors convert at **24.91%** compared to **13.93%** for returning visitors.
 
 ---
 
 ## 🚀 Quick Start
 
-### Option 1: Docker (Recommended)
+### Option 1: One-Command Docker Run (Recommended)
 
-Requirements: Docker Desktop with Docker Compose and an internet connection for the image build and first Spark Kafka connector download.
+Make sure Docker Desktop is running, then run:
 
-```powershell
+```bash
 docker compose up --build -d
-docker compose ps
 ```
 
-Compose trains the model before starting the streaming scorer. Follow the initial training with `docker compose logs -f model-trainer`, then open the dashboard at [http://localhost:8501](http://localhost:8501). To inspect scoring logs or stop the stack:
+* **Dashboard Web UI:** Open [http://localhost:8501](http://localhost:8501)
+* **Check Status:** `docker compose ps`
+* **View Live Streaming Logs:** `docker compose logs -f streaming`
+* **Stop Everything:** `docker compose down`
 
-```powershell
-docker compose logs -f streaming
-docker compose down
-```
-
-The trained model, live prediction files, and Spark checkpoints are generated locally and are not committed.
+---
 
 ### Option 2: Local Step-by-Step Run (PowerShell)
 
-Requirements: Python 3.10+ and Java 17. On Windows, local Spark also requires Hadoop `winutils` configuration; use the Docker option if that is unavailable.
-
-From the repository root, create the environment, install dependencies, and train the model:
-
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python src/ml/train.py
-```
+# 1. Activate Virtual Environment
+.\cluster\Scripts\Activate.ps1
 
-Start Kafka in one terminal:
-
-```powershell
-docker compose up -d kafka
-```
-
-Then run the producer, scorer, and dashboard in three separate terminals, with the virtual environment activated in each:
-
-```powershell
-python src/producer/kafka_producer.py --rate 0.8
-```
-
-```powershell
-python src/streaming/spark_streaming.py
-```
-
-```powershell
-streamlit run dashboard/app.py
-```
-
-The local producer and scorer use `localhost:9092` and topic `ecommerce-sessions` by default. Configure `KAFKA_BOOTSTRAP` or `KAFKA_TOPIC` to use different values. Add `--limit 100` to the producer command to replay a finite number of events.
-
-Run the batch analytics and tests from the repository root:
-
-```powershell
+# 2. Run Module 1 (PySpark RDDs)
 python src/analytics/01_rdd_analytics.py
+
+# 3. Run Module 2 (Spark SQL Analytics)
 python src/analytics/02_spark_sql_analytics.py
-python src/ml/clustering.py
-python -m pytest
+
+# 4. Run Module 3 (Train PySpark MLlib Model)
+python src/ml/train.py
+
+# 5. Start Live Pipeline (Open 3 Terminals)
+python src/producer/kafka_producer.py --rate 0.8     # Terminal 1: Event Producer
+python src/streaming/spark_streaming.py              # Terminal 2: Streaming Scorer
+streamlit run dashboard/app.py                       # Terminal 3: Dashboard UI
 ```
 
 ---
@@ -118,46 +86,27 @@ python -m pytest
 ## 📂 Repository Structure
 
 ```text
-Real-Time-E-Commerce-Analytics-Customer-Purchase-Prediction-Platform/
+ecommerce-intelligence/
 ├── dashboard/
-│   └── app.py                         # Streamlit and Plotly dashboard
+│   └── app.py                        # Streamlit + Plotly live monitoring dashboard
 ├── data/
-│   ├── processed/
-│   │   ├── batch_monthly_summary.csv  # Spark SQL monthly summary
-│   │   ├── cluster_metrics.json       # Sample K-Means evaluation
-│   │   ├── cluster_profile.csv        # Sample visitor-cluster profile
-│   │   └── model_metrics.json         # Sample Random Forest evaluation
-│   └── raw/
-│       └── online_shoppers_intention.csv
+│   ├── processed/                    # Scored sessions, monthly summary, metrics JSON
+│   └── raw/                          # UCI Online Shoppers Purchasing Intention dataset
 ├── docs/
-│   └── project_report.md
+│   └── project_report.md             # Complete academic submission report
+├── models/
+│   └── spark_purchase_model/         # Serialized PySpark MLlib PipelineModel
 ├── notebooks/
-│   └── exploratory_analysis.ipynb
+│   └── exploratory_analysis.ipynb    # Jupyter Notebook for EDA & Spark SQL
 ├── src/
-│   ├── analytics/
-│   │   ├── 01_rdd_analytics.py
-│   │   └── 02_spark_sql_analytics.py
-│   ├── ml/
-│   │   ├── clustering.py
-│   │   └── train.py
-│   ├── producer/
-│   │   └── kafka_producer.py
-│   └── streaming/
-│       └── spark_streaming.py
+│   ├── analytics/                    # 01_rdd_analytics.py & 02_spark_sql_analytics.py
+│   ├── ml/                           # train.py (PySpark MLlib distributed training)
+│   ├── producer/                     # kafka_producer.py
+│   └── streaming/                    # spark_streaming.py
 ├── tests/
-│   └── test_pipeline.py
-├── .dockerignore
-├── .gitignore
-├── docker-compose.yml
-├── Dockerfile
-├── Notes.md
-└── requirements.txt
+│   └── test_pipeline.py              # Sanity tests (run with: pytest tests/test_pipeline.py)
+├── docker-compose.yml                # Multi-service container orchestration
+├── Dockerfile                        # Python 3.11 + OpenJDK 17 Spark container
+├── requirements.txt                  # Python dependencies
+└── Notes.md                          # Comprehensive step-by-step notes & viva Q&A
 ```
-
-`models/spark_purchase_model/`, `data/processed/live_predictions/`, and `checkpoints/live_predictions/` are created at runtime and intentionally excluded from version control.
-
----
-
-## Dataset
-
-The raw data is the [Online Shoppers Purchasing Intention Dataset](https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset) from the UCI Machine Learning Repository. It contains 12,330 sessions and is included under `data/raw/`.

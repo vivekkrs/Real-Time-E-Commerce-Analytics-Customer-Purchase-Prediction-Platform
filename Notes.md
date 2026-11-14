@@ -1,14 +1,14 @@
 # E-Commerce Intelligence: End-to-End Implementation Guide & Notes
 
-A setup and project defense guide for the **Real-Time E-Commerce Analytics & Customer Purchase Prediction Platform**.
+A complete, production-grade guide for building, running, and submitting the **Real-Time E-Commerce Analytics & Customer Purchase Prediction Platform** using PySpark, Kafka, Spark MLlib, Spark Structured Streaming, Docker, and Streamlit.
 
 ---
 
 ## ⚡ Master Command Cheatsheet (Quick Copy-Paste)
 
-> **Important:** Run commands from the repository root:
+> **Important:** Always make sure your terminal is inside the project directory:
 > ```powershell
-> Set-Location <repository-root>
+> cd "d:\Cluster Computing\Assignment\ecommerce-intelligence"
 > ```
 
 ### 🐳 Method A: One-Command Full Docker Run (Recommended)
@@ -27,7 +27,7 @@ A setup and project defense guide for the **Real-Time E-Commerce Analytics & Cus
 ### 💻 Method B: Local Execution (Step-by-Step in Virtual Environment)
 | Task / Script | PowerShell Command |
 | :--- | :--- |
-| **1. Activate Virtual Environment** | `.\.venv\Scripts\Activate.ps1` |
+| **1. Activate Virtual Environment** | `.\cluster\Scripts\Activate.ps1` |
 | **2. Run Module 1 (PySpark RDDs)** | `python src/analytics/01_rdd_analytics.py` |
 | **3. Run Module 2 (Spark SQL)** | `python src/analytics/02_spark_sql_analytics.py` |
 | **4. Run Module 3 (MLlib Model Train)** | `python src/ml/train.py` |
@@ -63,7 +63,7 @@ A setup and project defense guide for the **Real-Time E-Commerce Analytics & Cus
   - **Event Streaming:** Apache Kafka (Docker Compose)
   - **Batch & Foundations:** PySpark RDDs (map/reduceByKey), PySpark DataFrames, Spark SQL
   - **Machine Learning:** PySpark MLlib (`Pipeline`, `VectorAssembler`, `RandomForestClassifier`, `BinaryClassificationEvaluator`)
-  - **Stream Processing:** Spark Structured Streaming (`readStream` from Kafka, `.transform(model)`, JSON sink)
+  - **Stream Processing:** Spark Structured Streaming (`readStream` from Kafka, `.transform(model)`, Parquet/JSON sink)
   - **Dashboard & UI:** Streamlit + Plotly
   - **Containerization:** Docker & Docker Compose
 
@@ -72,20 +72,20 @@ A setup and project defense guide for the **Real-Time E-Commerce Analytics & Cus
 ## 2. Folder Structure
 
 ```text
-Real-Time-E-Commerce-Analytics-Customer-Purchase-Prediction-Platform/
+ecommerce-intelligence/
 ├── dashboard/
 │   └── app.py                        # Streamlit + Plotly interactive live monitoring dashboard
 ├── data/
 │   ├── processed/
 │   │   ├── batch_monthly_summary.csv # Spark SQL aggregated monthly metrics
-│   │   ├── live_predictions/         # Spark JSON prediction output (generated)
+│   │   ├── live_predictions.jsonl    # Real-time scored sessions with purchase probabilities
 │   │   └── model_metrics.json        # Test evaluation report (ROC-AUC 91.74%, Acc 90.20%)
 │   └── raw/
 │       └── online_shoppers_intention.csv # Source UCI benchmark dataset
 ├── docs/
 │   └── project_report.md             # Complete academic submission report (Markdown)
 ├── models/
-│   └── spark_purchase_model/         # Generated serialized PySpark MLlib PipelineModel
+│   └── spark_purchase_model/         # Serialized PySpark MLlib PipelineModel
 ├── notebooks/
 │   └── exploratory_analysis.ipynb    # Jupyter Notebook for interactive EDA & Spark SQL
 ├── src/
@@ -93,7 +93,6 @@ Real-Time-E-Commerce-Analytics-Customer-Purchase-Prediction-Platform/
 │   │   ├── 01_rdd_analytics.py       # Module 1: PySpark RDDs (map/reduceByKey/filter)
 │   │   └── 02_spark_sql_analytics.py # Module 2: DataFrames, SQL views & Window Functions
 │   ├── ml/
-│   │   ├── clustering.py             # K-Means visitor segmentation
 │   │   └── train.py                  # Module 3: Distributed PySpark MLlib Pipeline
 │   ├── producer/
 │   │   └── kafka_producer.py         # Module 4: Live Event Producer & Kafka publisher
@@ -118,11 +117,10 @@ Before running the commands, verify that you have:
    ```powershell
    python --version
    ```
-2. **Java 17 (required by the project Docker image and Apache Spark):**
+2. **Java 8, 11, or 17 (Required by Apache Spark):**
    ```powershell
    java -version
    ```
-   On Windows, local Spark also requires Hadoop `winutils` configured; Docker avoids this host setup.
 3. **Docker Desktop installed and running:**
    ```powershell
    docker --version
@@ -133,21 +131,24 @@ Before running the commands, verify that you have:
 
 ## Step 1: Virtual Environment Setup
 
-Open PowerShell in the repository root:
+Open PowerShell in the `ecommerce-intelligence` root folder:
 
 ```powershell
-# Create the project virtual environment
-python -m venv .venv
+# Navigate into the project folder
+cd "d:\Cluster Computing\Assignment\ecommerce-intelligence"
+
+# Create a dedicated virtual environment named cluster
+python -m venv cluster
 
 # Activate the virtual environment on Windows
-.\.venv\Scripts\Activate.ps1
+.\cluster\Scripts\Activate.ps1
 ```
 
 > **Note for Execution Policy Error:**
 > If PowerShell blocks script activation with an `Execution_Policies` error, run:
 > ```powershell
 > Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-> .\.venv\Scripts\Activate.ps1
+> .\cluster\Scripts\Activate.ps1
 > ```
 
 Upgrade pip and install the required dependencies:
@@ -160,17 +161,14 @@ pip install -r requirements.txt
 
 ## Step 2: One-Command Docker Deployment
 
-Docker Compose trains the model, then starts Kafka, the producer, Spark scoring, and the dashboard:
+You can launch the **entire end-to-end platform with a single command** using Docker Compose (Kafka, Producer, PySpark Streaming, and Streamlit Dashboard):
 
 ```powershell
-# Build the image and start the services in the background
+# Build and run all 4 containers in the background
 docker compose up --build -d
 
 # Check live status of all services
 docker compose ps
-
-# Watch the initial model training
-docker compose logs -f model-trainer
 ```
 
 * **Dashboard Web UI:** Open [http://localhost:8501](http://localhost:8501)
@@ -239,7 +237,7 @@ python src/analytics/02_spark_sql_analytics.py
   4. `StandardScaler`: Normalizes feature vectors across worker partitions.
   5. Estimator: `RandomForestClassifier(featuresCol="features", labelCol="label", numTrees=25, maxDepth=6)`.
   6. Evaluator: `BinaryClassificationEvaluator(metricName="areaUnderROC")`.
-  7. Export: Persist the trained `PipelineModel` to the generated `models/spark_purchase_model/` directory.
+  7. Export: Persist the trained `PipelineModel` to `models/spark_purchase_model/`.
 
 **Run Command:**
 ```powershell
@@ -267,13 +265,12 @@ python src/producer/kafka_producer.py --rate 0.8
 ## Step 7: PySpark Structured Streaming & Live Scoring (Module 5)
 
 - **Script:** `src/streaming/spark_streaming.py`
-- **Goal:** Ingest Kafka events continuously, load the trained `models/spark_purchase_model`, run inference using native `vector_to_array`, and write JSON prediction files.
+- **Goal:** Ingest events continuously, load the pre-trained `models/spark_purchase_model`, run real-time inference using native `vector_to_array`, and write predictions to Parquet/JSON storage.
 - **Features:**
-  - Uses native `vector_to_array` to extract class probabilities.
-  - Invokes `pipeline_model.transform(stream_df)` on the Kafka streaming DataFrame.
+  - Uses native JVM `vector_to_array` to eliminate socket timeouts.
+  - Invokes `pipeline_model.transform(stream_df)` natively on the streaming DataFrame.
   - Calculates live purchase probability and intent prediction (`1` or `0`).
-  - Writes append-only output under `data/processed/live_predictions/` and tracks Kafka offsets in `checkpoints/live_predictions/`.
-  - Downloads the matching Spark Kafka connector on first startup.
+  - Writes streaming sink to `data/processed/live_predictions.jsonl`.
 
 **Run Command (in another terminal):**
 ```powershell
@@ -287,7 +284,7 @@ python src/streaming/spark_streaming.py
 - **Script:** `dashboard/app.py`
 - **Goal:** Real-time visual monitoring interface for stakeholders.
 - **Features:**
-  - **Live KPI Counters:** Recent sessions scored, recent high-intent sessions, intent rate, and average purchase probability (from the newest 250 output files, capped at 10,000 sessions).
+  - **Live KPI Counters:** Total Sessions, Current Conversion Rate, High-Intent Sessions.
   - **Interactive Gauges & Trend Charts:** Real-time purchase probability gauge, exit rate distribution, and monthly conversion comparisons.
   - **Live Stream Feed:** Real-time streaming table showing latest sessions with their predicted purchase probability and status tags.
 
@@ -302,7 +299,7 @@ Open your browser at `http://localhost:8501`.
 
 ## Step 9: Running Automated Tests
 
-Run the test suite to verify the dataset, event serialization, model-training entrypoint, metrics, and batch summary:
+Run the test suite to verify the dataset, trained models, metrics, and batch summary:
 
 ```powershell
 pytest tests/test_pipeline.py -v
@@ -317,5 +314,5 @@ pytest tests/test_pipeline.py -v
 | **Why use PySpark RDDs if DataFrames are faster?** | RDDs provide low-level functional control (`map`, `reduceByKey`, `partitionBy`) and demonstrate understanding of distributed data structures, lineage graphs (DAG), and lazy evaluation without automatic query optimization. |
 | **Why is PySpark MLlib required instead of Scikit-Learn?** | Scikit-Learn collects all data into single-node Python memory (driver bottleneck). PySpark MLlib distributes matrix calculations and tree splits across all partitions and worker nodes, and exports a `PipelineModel` that can directly score live Spark Structured Streaming DataFrames via `.transform()`. |
 | **What is the role of Kafka in this architecture?** | Kafka acts as a distributed, fault-tolerant message buffer. It decouples high-throughput clickstream event ingestion from the Spark Structured Streaming consumer, preventing data loss during traffic spikes. |
-| **How does Spark Structured Streaming handle fault tolerance?** | Structured Streaming persists source offsets and query progress in its checkpoint directory. Restarting with the same checkpoint resumes processing from recorded Kafka offsets; the file sink uses checkpointing to avoid duplicate committed batches. |
+| **How does Spark Structured Streaming handle fault tolerance?** | Structured Streaming combines Kafka offset tracking with **checkpointing** and **write-ahead logs** (WAL). If a worker or driver fails, Spark restarts from the exact recorded offset and guarantees end-to-end exactly-once processing when writing to Parquet. |
 | **Why store data in Apache Parquet format?** | Parquet is a columnar storage format with snappy compression and dictionary encoding. It allows projection pushdown and column pruning, drastically reducing disk I/O and query time for downstream analytics. |
