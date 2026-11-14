@@ -28,7 +28,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard.data_loader import load_live_data as read_live_data
+from data_loader import load_live_data as read_live_data
 
 # Configure Streamlit page layout
 st.set_page_config(

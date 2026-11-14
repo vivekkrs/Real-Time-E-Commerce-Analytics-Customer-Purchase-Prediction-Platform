@@ -1,6 +1,8 @@
 import csv
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,20 @@ def test_producer_rejects_malformed_dataset_row():
 
 def test_model_training_entrypoint_is_available():
     assert (ROOT / "src/ml/train.py").is_file()
+
+
+def test_dashboard_loader_imports_from_streamlit_app_directory():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from data_loader import load_live_data; assert callable(load_live_data)",
+        ],
+        cwd=ROOT / "dashboard",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_metrics_json_has_valid_model_scores():
@@ -121,7 +137,7 @@ def test_live_prediction_loader_rejects_malformed_probability(tmp_path):
         load_live_data(tmp_path)
 
 
-def test_dashboard_renders():
+def test_dashboard_renders_from_repository_root():
     from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_file(str(ROOT / "dashboard/app.py"), default_timeout=20).run()
@@ -132,3 +148,11 @@ def test_dashboard_renders():
         "Intent Rate",
         "Avg. Probability",
     ]
+
+
+def test_dashboard_renders_from_dashboard_directory(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.chdir(ROOT / "dashboard")
+    app = AppTest.from_file(str(ROOT / "dashboard/app.py"), default_timeout=20).run()
+    assert not app.exception
