@@ -1,0 +1,5 @@
+{
+    "algorithm": "KMeans",
+    "best_k": 2,
+    "silhouette": 0.6435
+}

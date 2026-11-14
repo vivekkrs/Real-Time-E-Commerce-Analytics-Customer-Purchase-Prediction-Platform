@@ -1,0 +1,78 @@
+services:
+  # 1. Apache Kafka Message Broker (KRaft Mode - No Zookeeper needed)
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: ecommerce-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ecommerce-net
+
+  # 2. Real-Time Customer Session Producer
+  producer:
+    build: .
+    container_name: ecommerce-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["python", "src/producer/kafka_producer.py", "--rate", "0.8", "--bootstrap", "kafka:29092"]
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - ecommerce-net
+
+  # 3. PySpark Structured Streaming & Real-Time ML Inference Scorer
+  streaming:
+    build: .
+    container_name: ecommerce-streaming
+    depends_on:
+      - producer
+    command: ["python", "src/streaming/spark_streaming.py"]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./checkpoints:/app/checkpoints
+    restart: unless-stopped
+    networks:
+      - ecommerce-net
+
+  # 4. Streamlit Interactive Web Dashboard
+  dashboard:
+    build: .
+    container_name: ecommerce-dashboard
+    depends_on:
+      - streaming
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "dashboard/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    restart: unless-stopped
+    networks:
+      - ecommerce-net
+
+networks:
+  ecommerce-net:
+    driver: bridge
