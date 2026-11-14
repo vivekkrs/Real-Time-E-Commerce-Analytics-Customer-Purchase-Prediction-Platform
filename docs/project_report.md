@@ -124,7 +124,7 @@ flowchart TD
 ### Module 6: Interactive Streamlit Dashboard (`dashboard/app.py`)
 * **Objective:** Executive monitoring interface with dark-theme styling.
 * **Interactive Elements:**
-  * **Live KPI Cards:** Total Sessions Scored, High-Intent Buyers, Live Intent Rate (%), Average Probability.
+  * **Live KPI Cards:** Recent sessions scored, recent high-intent sessions, live intent rate (%), and average purchase probability (bounded to the newest 250 output files and 10,000 sessions).
   * **Gauge Indicator:** Real-time gauge reflecting current purchase probability across active shoppers.
   * **Visitor Segmentation Chart:** Total sessions vs. high-intent conversions by visitor type.
   * **Live Feed Table:** Formatted table displaying recent sessions, purchase probability, and prediction status badges (`🟢 High Intent (Buy)` vs `⚪ Browsing`).

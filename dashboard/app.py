@@ -23,12 +23,12 @@ streamlit run dashboard/app.py
 
 import os
 import json
-import time
-import glob
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+from dashboard.data_loader import load_live_data as read_live_data
 
 # Configure Streamlit page layout
 st.set_page_config(
@@ -50,14 +50,15 @@ st.markdown(
         font-weight: 700 !important;
         color: #00E5FF;
     }
-    div[data-testid="stMetricLabel"] {
+    label[data-testid="stMetricLabel"],
+    label[data-testid="stMetricLabel"] * {
         font-size: 0.95rem !important;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        color: #A0AEC0;
+        color: #CBD5E1 !important;
     }
-    .metric-card {
-        background: rgba(26, 32, 44, 0.7);
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, rgba(26, 32, 44, 0.96), rgba(17, 24, 39, 0.94));
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         padding: 16px;
@@ -82,6 +83,8 @@ st.markdown(
 # Base directories
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 predictions_dir = os.path.join(base_dir, "data", "processed", "live_predictions")
+max_prediction_files = 250
+max_dashboard_rows = 10_000
 summary_file = os.path.join(base_dir, "data", "processed", "batch_monthly_summary.csv")
 metrics_file = os.path.join(base_dir, "data", "processed", "model_metrics.json")
 raw_data_file = os.path.join(base_dir, "data", "raw", "online_shoppers_intention.csv")
@@ -125,219 +128,228 @@ with st.sidebar:
         """
     )
 
+    st.caption(
+        f"Dashboard uses the latest {max_prediction_files} Spark output files "
+        f"(up to {max_dashboard_rows:,} sessions)."
+    )
 
 # -----------------------------------------------------------------------------
 # MAIN HEADER & STATUS BAR
 # -----------------------------------------------------------------------------
 st.title("🛒 Real-Time E-Commerce Analytics & Purchase Prediction")
-st.markdown(
-    """
-    <span class="status-badge badge-online">● STREAM PIPELINE ACTIVE</span>
-    <span class="status-badge badge-pyspark">● PYSPARK MLLIB: SCORING</span>
-    <span class="status-badge badge-kafka">● DISTRIBUTED BUFFER: OK</span>
-    """,
-    unsafe_allow_html=True,
-)
-st.write("")
-
-# -----------------------------------------------------------------------------
-# DATA LOADING FUNCTION
-# -----------------------------------------------------------------------------
-def load_live_data():
-    if not os.path.isdir(predictions_dir):
-        return pd.DataFrame()
-    files = glob.glob(os.path.join(predictions_dir, "*.json"))
-    if not files:
-        return pd.DataFrame()
-    frames = [pd.read_json(path, lines=True) for path in files]
-    df = pd.concat(frames, ignore_index=True)
-    df["event_timestamp"] = pd.to_datetime(df["event_timestamp"], utc=True)
-    return df.sort_values("event_timestamp").reset_index(drop=True)
 
 
-live_df = load_live_data()
+@st.cache_data(ttl=3, max_entries=1)
+def load_dashboard_data(directory):
+    return read_live_data(
+        directory,
+        max_files=max_prediction_files,
+        max_rows=max_dashboard_rows,
+    )
 
-# -----------------------------------------------------------------------------
-# TOP METRICS ROW
-# -----------------------------------------------------------------------------
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-if not live_df.empty:
-    total_scored = len(live_df)
-    high_intent = len(live_df[live_df["prediction"] == 1.0])
-    intent_rate = (high_intent / total_scored) * 100 if total_scored > 0 else 0
-    avg_purchase_prob = live_df["purchase_prob"].mean() * 100
-else:
-    total_scored = 0
-    high_intent = 0
-    intent_rate = 0.0
-    avg_purchase_prob = 0.0
+@st.fragment(run_every=refresh_rate if auto_refresh else None)
+def render_live_dashboard():
+    live_df = load_dashboard_data(predictions_dir)
+    if live_df.empty:
+        pipeline_status = "● WAITING FOR SCORED EVENTS"
+        pipeline_status_class = "badge-kafka"
+    else:
+        last_event_age = (
+            pd.Timestamp.now(tz="UTC") - live_df["event_timestamp"].iloc[-1]
+        ).total_seconds()
+        if last_event_age <= max(10, refresh_rate * 3):
+            pipeline_status = "● LIVE SCORING ACTIVE"
+            pipeline_status_class = "badge-online"
+        else:
+            pipeline_status = "● SCORING FEED STALE"
+            pipeline_status_class = "badge-kafka"
 
-with kpi1:
-    st.metric("Total Sessions Scored", f"{total_scored:,}")
-with kpi2:
-    st.metric("High-Intent Buyers Detected", f"{high_intent:,}")
-with kpi3:
-    st.metric("Live Purchase Intent Rate", f"{intent_rate:.1f}%")
-with kpi4:
-    st.metric("Average Purchase Probability", f"{avg_purchase_prob:.1f}%")
+    st.markdown(
+        f'<span class="status-badge {pipeline_status_class}">{pipeline_status}</span>',
+        unsafe_allow_html=True,
+    )
+    st.write("")
 
-st.markdown("---")
+    # -----------------------------------------------------------------------------
+    # TOP METRICS ROW
+    # -----------------------------------------------------------------------------
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-# -----------------------------------------------------------------------------
-# ROW 2: LIVE GAUGE & VISITOR BREAKDOWN
-# -----------------------------------------------------------------------------
-col_gauge, col_visitor = st.columns([1, 1])
+    if not live_df.empty:
+        total_scored = len(live_df)
+        high_intent = len(live_df[live_df["prediction"] == 1.0])
+        intent_rate = (high_intent / total_scored) * 100 if total_scored > 0 else 0
+        avg_purchase_prob = live_df["purchase_prob"].mean() * 100
+    else:
+        total_scored = 0
+        high_intent = 0
+        intent_rate = 0.0
+        avg_purchase_prob = 0.0
 
-with col_gauge:
-    st.subheader("🎯 Real-Time Purchase Probability Gauge")
-    gauge_val = avg_purchase_prob if total_scored > 0 else 15.5
+    with kpi1:
+        st.metric("Recent Sessions", f"{total_scored:,}")
+    with kpi2:
+        st.metric("High Intent", f"{high_intent:,}")
+    with kpi3:
+        st.metric("Intent Rate", f"{intent_rate:.1f}%")
+    with kpi4:
+        st.metric("Avg. Probability", f"{avg_purchase_prob:.1f}%")
 
-    fig_gauge = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=gauge_val,
-            number={"suffix": "%", "font": {"size": 36, "color": "#00E5FF"}},
-            title={"text": "Average Probability Across Active Sessions", "font": {"size": 16}},
-            gauge={
-                "axis": {"range": [0, 100]},
-                "bar": {"color": "#00E5FF"},
-                "steps": [
-                    {"range": [0, 20], "color": "rgba(255, 255, 255, 0.05)"},
-                    {"range": [20, 50], "color": "rgba(255, 179, 0, 0.2)"},
-                    {"range": [50, 100], "color": "rgba(0, 230, 118, 0.3)"},
-                ],
-                "threshold": {
-                    "line": {"color": "#00E676", "width": 4},
-                    "thickness": 0.75,
-                    "value": 50,
+    st.markdown("---")
+
+    # -----------------------------------------------------------------------------
+    # ROW 2: LIVE GAUGE & VISITOR BREAKDOWN
+    # -----------------------------------------------------------------------------
+    col_gauge, col_visitor = st.columns([1, 1])
+
+    with col_gauge:
+        st.subheader("🎯 Real-Time Purchase Probability Gauge")
+        gauge_val = avg_purchase_prob if total_scored > 0 else None
+
+        fig_gauge = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=gauge_val,
+                number={"suffix": "%", "font": {"size": 36, "color": "#00E5FF"}},
+                title={"text": "Average Probability Across Active Sessions", "font": {"size": 16}},
+                gauge={
+                    "axis": {"range": [0, 100]},
+                    "bar": {"color": "#00E5FF"},
+                    "steps": [
+                        {"range": [0, 20], "color": "rgba(255, 255, 255, 0.05)"},
+                        {"range": [20, 50], "color": "rgba(255, 179, 0, 0.2)"},
+                        {"range": [50, 100], "color": "rgba(0, 230, 118, 0.3)"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#00E676", "width": 4},
+                        "thickness": 0.75,
+                        "value": 50,
+                    },
                 },
+            )
+        )
+        fig_gauge.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_gauge, width="stretch")
+
+    with col_visitor:
+        st.subheader("👥 Live Visitor Segmentation & Intent")
+        if not live_df.empty:
+            visitor_counts = live_df.groupby("VisitorType")["prediction"].agg(["count", "sum"]).reset_index()
+            visitor_counts.columns = ["VisitorType", "Total", "HighIntent"]
+
+            fig_bar = px.bar(
+                visitor_counts,
+                x="VisitorType",
+                y=["Total", "HighIntent"],
+                barmode="group",
+                labels={"value": "Sessions", "variable": "Metric"},
+                color_discrete_map={"Total": "#4A5568", "HighIntent": "#00E676"},
+                title="Total Sessions vs. High Intent by Visitor Type",
+            )
+            fig_bar.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_bar, width="stretch")
+        else:
+            st.info("Waiting for streaming data to generate visitor chart...")
+
+    # -----------------------------------------------------------------------------
+    # ROW 3: HISTORICAL BENCHMARK & STREAMING TIMELINE
+    # -----------------------------------------------------------------------------
+    col_trend, col_hist = st.columns([1, 1])
+
+    with col_trend:
+        st.subheader("📈 Live Purchase Probability Timeline")
+        if not live_df.empty:
+            recent_df = live_df.tail(40).copy().reset_index()
+            recent_df["prob_pct"] = recent_df["purchase_prob"] * 100
+
+            fig_line = px.line(
+                recent_df,
+                x="event_timestamp",
+                y="prob_pct",
+                labels={"event_timestamp": "Event Time", "prob_pct": "Purchase Prob (%)"},
+                title="Real-Time Purchase Probability Fluctuations",
+                color_discrete_sequence=["#00E5FF"],
+            )
+            fig_line.add_hline(y=50, line_dash="dash", line_color="#FF5252", annotation_text="50% Threshold")
+            fig_line.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_line, width="stretch")
+        else:
+            st.info("Start the event producer to stream timeline events.")
+
+    with col_hist:
+        st.subheader("📅 Spark SQL Monthly Conversion Benchmark")
+        if os.path.exists(summary_file):
+            sum_df = pd.read_csv(summary_file)
+            fig_hist = px.bar(
+                sum_df,
+                x="Month",
+                y="conversion_rate_pct",
+                labels={"conversion_rate_pct": "Conversion Rate (%)"},
+                color="conversion_rate_pct",
+                color_continuous_scale="Viridis",
+                title="Historical Conversion Rate by Month (Spark SQL)",
+            )
+            fig_hist.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_hist, width="stretch")
+        else:
+            st.info("Run `02_spark_sql_analytics.py` to generate monthly summary.")
+
+    # -----------------------------------------------------------------------------
+    # ROW 4: LIVE CLICKSTREAM PREDICTION FEED TABLE
+    # -----------------------------------------------------------------------------
+    st.subheader("⚡ Live Scored Clickstream Feed (Latest Sessions)")
+
+    if not live_df.empty:
+        feed_df = live_df.tail(15).iloc[::-1].copy()
+
+        feed_df["Probability"] = feed_df["purchase_prob"].apply(lambda p: f"{p*100:.1f}%")
+        feed_df["Status"] = feed_df["prediction"].apply(
+            lambda p: "🟢 High Intent (Buy)" if p == 1.0 else "⚪ Browsing"
+        )
+        feed_df["Actual Revenue"] = feed_df["Revenue"].apply(
+            lambda r: "✅ Purchase" if r else "❌ None"
+        )
+
+        display_table = feed_df[
+            [
+                "session_id",
+                "event_timestamp",
+                "VisitorType",
+                "Month",
+                "PageValues",
+                "ExitRates",
+                "Probability",
+                "Status",
+                "Actual Revenue",
+            ]
+        ]
+
+        st.dataframe(
+            display_table,
+            width="stretch",
+            column_config={
+                "session_id": "Session ID",
+                "event_timestamp": "Timestamp",
+                "VisitorType": "Visitor Category",
+                "PageValues": st.column_config.NumberColumn("Page Value", format="%.1f"),
+                "ExitRates": st.column_config.NumberColumn("Exit Rate", format="%.3f"),
+                "Probability": "Purchase Prob",
+                "Status": "ML Prediction",
+                "Actual Revenue": "Actual Label",
             },
         )
-    )
-    fig_gauge.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig_gauge, use_container_width=True)
-
-with col_visitor:
-    st.subheader("👥 Live Visitor Segmentation & Intent")
-    if not live_df.empty:
-        visitor_counts = live_df.groupby("VisitorType")["prediction"].agg(["count", "sum"]).reset_index()
-        visitor_counts.columns = ["VisitorType", "Total", "HighIntent"]
-
-        fig_bar = px.bar(
-            visitor_counts,
-            x="VisitorType",
-            y=["Total", "HighIntent"],
-            barmode="group",
-            labels={"value": "Sessions", "variable": "Metric"},
-            color_discrete_map={"Total": "#4A5568", "HighIntent": "#00E676"},
-            title="Total Sessions vs. High Intent by Visitor Type",
-        )
-        fig_bar.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_bar, use_container_width=True)
     else:
-        st.info("Waiting for streaming data to generate visitor chart...")
-
-# -----------------------------------------------------------------------------
-# ROW 3: HISTORICAL BENCHMARK & STREAMING TIMELINE
-# -----------------------------------------------------------------------------
-col_trend, col_hist = st.columns([1, 1])
-
-with col_trend:
-    st.subheader("📈 Live Purchase Probability Timeline")
-    if not live_df.empty:
-        recent_df = live_df.tail(40).copy().reset_index()
-        recent_df["prob_pct"] = recent_df["purchase_prob"] * 100
-
-        fig_line = px.line(
-            recent_df,
-            x="index",
-            y="prob_pct",
-            labels={"index": "Recent Session Sequence", "prob_pct": "Purchase Prob (%)"},
-            title="Real-Time Purchase Probability Fluctuations",
-            color_discrete_sequence=["#00E5FF"],
+        st.warning("⚠️ No scored sessions are available yet.")
+        st.markdown(
+            """
+            **To see live streaming events:**
+            1. In Terminal 1, run the producer: `python src/producer/kafka_producer.py --rate 0.5`
+            2. In Terminal 2, run the streaming scorer: `python src/streaming/spark_streaming.py`
+            """
         )
-        fig_line.add_hline(y=50, line_dash="dash", line_color="#FF5252", annotation_text="50% Threshold")
-        fig_line.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_line, use_container_width=True)
-    else:
-        st.info("Start the event producer to stream timeline events.")
 
-with col_hist:
-    st.subheader("📅 Spark SQL Monthly Conversion Benchmark")
-    if os.path.exists(summary_file):
-        sum_df = pd.read_csv(summary_file)
-        fig_hist = px.bar(
-            sum_df,
-            x="Month",
-            y="conversion_rate_pct",
-            labels={"conversion_rate_pct": "Conversion Rate (%)"},
-            color="conversion_rate_pct",
-            color_continuous_scale="Viridis",
-            title="Historical Conversion Rate by Month (Spark SQL)",
-        )
-        fig_hist.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_hist, use_container_width=True)
-    else:
-        st.info("Run `02_spark_sql_analytics.py` to generate monthly summary.")
+    # -----------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# ROW 4: LIVE CLICKSTREAM PREDICTION FEED TABLE
-# -----------------------------------------------------------------------------
-st.subheader("⚡ Live Scored Clickstream Feed (Latest Sessions)")
 
-if not live_df.empty:
-    feed_df = live_df.tail(15).iloc[::-1].copy()
-
-    feed_df["Probability"] = feed_df["purchase_prob"].apply(lambda p: f"{p*100:.1f}%")
-    feed_df["Status"] = feed_df["prediction"].apply(
-        lambda p: "🟢 High Intent (Buy)" if p == 1.0 else "⚪ Browsing"
-    )
-    feed_df["Actual Revenue"] = feed_df["Revenue"].apply(
-        lambda r: "✅ Purchase" if r else "❌ None"
-    )
-
-    display_table = feed_df[
-        [
-            "session_id",
-            "event_timestamp",
-            "VisitorType",
-            "Month",
-            "PageValues",
-            "ExitRates",
-            "Probability",
-            "Status",
-            "Actual Revenue",
-        ]
-    ]
-
-    st.dataframe(
-        display_table,
-        use_container_width=True,
-        column_config={
-            "session_id": "Session ID",
-            "event_timestamp": "Timestamp",
-            "VisitorType": "Visitor Category",
-            "PageValues": st.column_config.NumberColumn("Page Value", format="%.1f"),
-            "ExitRates": st.column_config.NumberColumn("Exit Rate", format="%.3f"),
-            "Probability": "Purchase Prob",
-            "Status": "ML Prediction",
-            "Actual Revenue": "Actual Label",
-        },
-    )
-else:
-    st.warning("⚠️ No live scored sessions found in buffer yet.")
-    st.markdown(
-        """
-        **To see live streaming events:**
-        1. In Terminal 1, run the producer: `python src/producer/kafka_producer.py --rate 0.5`
-        2. In Terminal 2, run the streaming scorer: `python src/streaming/spark_streaming.py`
-        """
-    )
-
-# -----------------------------------------------------------------------------
-# AUTO-REFRESH SCRIPT
-# -----------------------------------------------------------------------------
-if auto_refresh:
-    time.sleep(refresh_rate)
-    st.rerun()
+render_live_dashboard()
